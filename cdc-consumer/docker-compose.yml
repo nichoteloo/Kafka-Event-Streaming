@@ -1,0 +1,111 @@
+version: "3"
+
+networks:
+  mynetwork:
+    ipam:
+      config:
+        - subnet: 172.19.0.0/24
+
+services:
+  source:
+    image: mysql:latest
+    container_name: sourcedbz
+    privileged: true
+    ports:
+      - 3306:3306
+    environment:
+      MYSQL_ROOT_PASSWORD: source
+      MYSQL_USER: user_source
+      MYSQL_PASSWORD: password
+      MYSQL_ROOT_HOST: '%'
+      MYSQL_DATABASE: source_test
+    volumes:
+      - ./mysql/source/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      mynetwork:
+        ipv4_address: 172.19.0.2
+
+  destination:
+    image: mysql:latest
+    container_name: destidbz
+    privileged: true
+    ports:
+      - 33060:33060
+    environment:
+      MYSQL_ROOT_PASSWORD: destination
+      MYSQL_USER: user_destination
+      MYSQL_PASSWORD: password
+      MYSQL_ROOT_HOST: '%'
+      MYSQL_DATABASE: desti_test
+    volumes:
+      - ./mysql/destination/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      mynetwork:
+        ipv4_address: 172.19.0.3
+
+  consumer_node:
+    build:
+      context: ./consumer
+      dockerfile: Dockerfile
+    stdin_open: true
+    tty: true
+    container_name: consumerdbz
+    volumes:
+      - ./consumer:/usr/src/app
+    ports:
+      - "8000:8000"
+    depends_on:
+      - destination
+      - zookeeper
+      - kafka
+    networks:
+      mynetwork:
+        ipv4_address: 172.19.0.4
+
+  zookeeper:
+    image: debezium/zookeeper
+    container_name: zookeeperdbz
+    ports:
+      - "2181:2181"
+      - "2888:2888"
+      - "3888:3888"
+    networks:
+      mynetwork:
+        ipv4_address: 172.19.0.5
+
+  kafka:
+    image: debezium/kafka
+    container_name: kafkadbz
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    depends_on:
+      - zookeeper
+    environment:
+      - ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_ADVERTISED_LISTENERS=LISTENER_EXT://localhost:29092,LISTENER_INT://kafka:9092
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=LISTENER_INT:PLAINTEXT,LISTENER_EXT:PLAINTEXT
+      - KAFKA_LISTENERS=LISTENER_INT://0.0.0.0:9092,LISTENER_EXT://0.0.0.0:29092
+      - KAFKA_INTER_BROKER_LISTENER_NAME=LISTENER_INT
+      - KAFKA_ADVERTISED_HOST_NAME=kafka
+    networks:
+      mynetwork:
+        ipv4_address: 172.19.0.6
+
+  connect:
+    image: debezium/connect
+    container_name: connectdbz
+    ports:
+      - "8083:8083"
+    environment:
+      - BOOTSTRAP_SERVERS=kafka:9092
+      - GROUP_ID=1
+      - CONFIG_STORAGE_TOPIC=my_connect_configs
+      - OFFSET_STORAGE_TOPIC=my_connect_offsets
+      - STATUS_STORAGE_TOPIC=my_connect_statuses
+    depends_on:
+      - zookeeper
+      - kafka
+    networks:
+      mynetwork:
+        ipv4_address: 172.19.0.7
